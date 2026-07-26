@@ -5,7 +5,7 @@ pub mod remove;
 pub mod run;
 
 #[derive(Parser)]
-#[command(name = "aur-manager")]
+#[command(name = "aur-pkg-manager")]
 #[command(version)]
 #[command(about = "Sandboxed AUR package manager")]
 pub struct Cli {
