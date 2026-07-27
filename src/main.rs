@@ -3,6 +3,9 @@ mod cli;
 mod logging;
 mod runtime;
 mod store;
+mod srcinfo;
+mod ui;
+mod config;
 
 use clap::Parser;
 use cli::Cli;

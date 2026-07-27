@@ -1,13 +1,21 @@
-pub fn build(package: &str) -> anyhow::Result<()> {
-    tracing::info!("Building {package}");
+use crate::ui;
 
-    // TODO
+pub fn build(package: &str) -> anyhow::Result<()> {
+    ui::step(format!("Building {package}"));
+
+    // TODO: run makepkg
+
+    ui::success(format!("Built {package}"));
+
     Ok(())
 }
 
 pub fn launch(package: &str) -> anyhow::Result<()> {
-    tracing::info!("Launching {package} in sandbox");
+    ui::step(format!("Launching {package} in sandbox"));
 
-    // TODO
+    // TODO: run sandbox
+
+    ui::success(format!("Launched {package}"));
+
     Ok(())
 }

@@ -1,5 +1,7 @@
+use crate::ui;
+
 pub fn install(package: String) -> anyhow::Result<()> {
-    tracing::info!("Installing {package}");
+    ui::header(&format!("Installing {}", package));
 
     crate::aur::clone(&package)?;
     crate::runtime::build(&package)?;
