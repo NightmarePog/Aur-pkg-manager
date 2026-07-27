@@ -74,6 +74,7 @@ dependencies = [
  "reqwest",
  "serde",
  "srcinfo",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
 ]
