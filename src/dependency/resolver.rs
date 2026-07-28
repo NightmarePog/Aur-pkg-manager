@@ -1,6 +1,6 @@
 use anyhow::Result;
 use srcinfo::Srcinfo;
-use super::model::{Dependency, DependencyKind};
+use super::{Dependency, DependencyKind};
 pub struct DependencyResolver;
 
 

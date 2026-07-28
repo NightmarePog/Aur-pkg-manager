@@ -28,14 +28,14 @@ impl<'a> Package<'a> {
         directory: &'a str,
     ) -> Result<Self, PackageNameParseError> {
         if name.contains('/') {
-            return Err(PackageNameParseError(name.to_string()));
+            Err(PackageNameParseError(name.to_string()))
+        } else {
+            Ok(Self {
+                name,
+                base,
+                directory,
+            })
         }
-
-        Ok(Self {
-            name,
-            base,
-            directory,
-        })
     }
 
     pub fn name(&self) -> &str {
