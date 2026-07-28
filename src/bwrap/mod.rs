@@ -1,7 +1,6 @@
 use std::ffi::OsString;
 
-mod runner;
-use runner::Bwrap;
+pub mod runner;
 
 pub struct Builder(Vec<OsString>);
 
@@ -93,6 +92,18 @@ impl Builder {
 
     pub fn clearenv(&mut self) -> &mut Self {
         self.arg("--clearenv")
+    }
+
+    pub fn bash(&mut self) -> &mut Self {
+        self.arg("--")
+            .arg("/usr/bin/bash")
+    }
+
+    pub fn makepkg(&mut self) -> &mut Self {
+        self.arg("--")
+            .arg("/usr/bin/makepkg")
+            .arg("-f")
+            .arg("--noconfirm")
     }
 
     pub fn build(self) -> anyhow::Result<runner::Bwrap> {

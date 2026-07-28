@@ -8,12 +8,13 @@ use std::{
 
 use thiserror::Error;
 
-use crate::{config, ui};
+use crate::{config};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Package<'a> {
     name: &'a str,
     base: &'a str,
+    directory: &'a str,
 }
 
 #[derive(Debug, Error)]
@@ -24,6 +25,7 @@ impl<'a> Package<'a> {
     pub fn new(
         name: &'a str,
         base: &'a str,
+        directory: &'a str,
     ) -> Result<Self, PackageNameParseError> {
         if name.contains('/') {
             return Err(PackageNameParseError(name.to_string()));
@@ -32,6 +34,7 @@ impl<'a> Package<'a> {
         Ok(Self {
             name,
             base,
+            directory,
         })
     }
 
@@ -44,22 +47,21 @@ impl<'a> Package<'a> {
     }
 
     pub fn clone_repository(
-        &self,
+        self,
         destination: &Path,
-    ) -> Result<(), CloneError> {
+    ) -> Result<&Path, CloneError> {
         let url = format!(
             "{}/{}.git",
             config::AUR_URL,
             self.base,
         );
 
-        ui::step(format!("Cloning {} repository", self.name));
 
         let output = Command::new("git")
             .args([
                 "clone",
                 &url,
-                destination.to_string_lossy().as_ref(),
+                self.directory,
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -71,7 +73,11 @@ impl<'a> Package<'a> {
             });
         }
 
-        Ok(())
+        Ok(destination)
+    }
+
+    pub fn clean(&self) -> Result<(), std::io::Error> {
+        std::fs::remove_dir_all(self.directory)
     }
 }
 

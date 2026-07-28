@@ -1,19 +1,15 @@
 mod aur;
 mod cli;
-mod logging;
-mod runtime;
-mod store;
 mod bwrap;
 mod ui;
 mod config;
+mod build;
+mod dependency;
 
 use clap::Parser;
 use cli::Cli;
-use tracing_subscriber::fmt;
 
 fn main() -> anyhow::Result<()> {
-    logging::init_logging();
-
     let cli = Cli::parse();
 
     match cli.command {
@@ -29,12 +25,4 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-pub fn init_logging() {
-    fmt()
-        .without_time()
-        .with_target(false)
-        .with_level(true)
-        .init();
 }
