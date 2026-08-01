@@ -1,13 +1,27 @@
 use std::{fs, path::PathBuf};
 
+use thiserror::Error;
+
 use crate::{bwrap, config};
 
 const SANDBOX_NAME: &str = "aur-pkg-manager";
 
-fn sandbox_path() -> PathBuf {
+#[derive(Debug, Error)]
+pub enum SandboxError {
+    #[error("failed to prepare the sandbox")]
+    Io(#[from] std::io::Error),
+
+    #[error("failed to locate the user data directory")]
+    MissingDataDir,
+
+    #[error(transparent)]
+    Spawn(#[from] bwrap::SpawnError),
+}
+
+fn sandbox_path() -> Result<PathBuf, SandboxError> {
     dirs::data_dir()
-        .expect("failed to get data directory")
-        .join(SANDBOX_NAME)
+        .map(|path| path.join(SANDBOX_NAME))
+        .ok_or(SandboxError::MissingDataDir)
 }
 
 pub struct SandboxFiles {
@@ -15,8 +29,8 @@ pub struct SandboxFiles {
 }
 
 impl SandboxFiles {
-    pub fn initialize() -> anyhow::Result<Self> {
-        let path = sandbox_path();
+    pub fn initialize() -> Result<Self, SandboxError> {
+        let path = sandbox_path()?;
 
         fs::create_dir_all(&path)?;
 
@@ -47,7 +61,7 @@ impl SandboxFiles {
         Ok(Self { path })
     }
 
-    fn copy_if_missing(from: &str, to: PathBuf) -> anyhow::Result<()> {
+    fn copy_if_missing(from: &str, to: PathBuf) -> Result<(), SandboxError> {
         if !to.exists() {
             fs::copy(from, to)?;
         }
@@ -55,7 +69,7 @@ impl SandboxFiles {
         Ok(())
     }
 
-    pub fn file(&self, name: &str) -> PathBuf {
+    fn file(&self, name: &str) -> PathBuf {
         self.path.join(name)
     }
 }
@@ -65,7 +79,7 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn new(sandbox: &SandboxFiles) -> anyhow::Result<Self> {
+    pub fn new(sandbox: &SandboxFiles) -> Result<Self, SandboxError> {
         fs::create_dir_all(config::BUILD_PATH)?;
 
         let mut builder = bwrap::Builder::new();

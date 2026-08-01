@@ -1,13 +1,38 @@
-use anyhow::{Context, Result};
-use crate::config;
+use crate::{config, dependency::{Dependency, DependencyKind}};
 use serde::Deserialize;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum RpcError {
+    #[error("cannot reach the AUR, check your internet connection")]
+    Offline(#[source] reqwest::Error),
+
+    #[error("failed to reach AUR RPC")]
+    Unreachable(#[source] reqwest::Error),
+
+    #[error("failed to parse AUR response")]
+    Malformed(#[source] reqwest::Error),
+
+    #[error("package '{0}' not found")]
+    NotFound(String),
+}
+
+impl RpcError {
+    fn request(error: reqwest::Error) -> Self {
+        if error.is_connect() || error.is_timeout() {
+            Self::Offline(error)
+        } else {
+            Self::Unreachable(error)
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct RpcResponse {
     pub results: Vec<RpcPackage>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RpcPackage {
     #[serde(rename = "Name")]
     pub name: String,
@@ -18,28 +43,107 @@ pub struct RpcPackage {
     #[serde(rename = "Maintainer")]
     pub maintainer: Option<String>,
 
+    #[serde(rename = "Submitter", default)]
+    pub submitter: Option<String>,
+
     #[serde(rename = "PackageBase")]
     pub package_base: String,
+
+    #[serde(rename = "Description", default)]
+    pub description: Option<String>,
+
+    #[serde(rename = "URL", default)]
+    pub url: Option<String>,
+
+    #[serde(rename = "NumVotes", default)]
+    pub votes: u32,
+
+    #[serde(rename = "Popularity", default)]
+    pub popularity: f64,
+
+    #[serde(rename = "OutOfDate", default)]
+    pub out_of_date: Option<i64>,
+
+    #[serde(rename = "LastModified", default)]
+    pub last_modified: i64,
+
+    #[serde(rename = "Depends", default)]
+    pub depends: Vec<String>,
+
+    #[serde(rename = "MakeDepends", default)]
+    pub make_depends: Vec<String>,
+
+    #[serde(rename = "CheckDepends", default)]
+    pub check_depends: Vec<String>,
+
+    #[serde(rename = "OptDepends", default)]
+    pub opt_depends: Vec<String>,
+
+    #[serde(rename = "Provides", default)]
+    pub provides: Vec<String>,
+
+    #[serde(rename = "Conflicts", default)]
+    pub conflicts: Vec<String>,
 }
 
+impl RpcPackage {
+    pub fn orphan(&self) -> bool {
+        self.maintainer.is_none()
+    }
 
+    fn dependencies_of<'a>(
+        dependencies: &'a [String],
+        kind: DependencyKind,
+    ) -> impl Iterator<Item = Dependency> + 'a {
+        dependencies
+            .iter()
+            .map(move |raw| Dependency::new(raw, kind))
+    }
 
-pub fn fetch_package_info(package: &str) -> Result<RpcPackage> {
+    pub fn dependencies<B: FromIterator<Dependency>>(&self) -> B {
+        Self::dependencies_of(&self.depends, DependencyKind::Runtime)
+            .chain(Self::dependencies_of(
+                &self.make_depends,
+                DependencyKind::Build,
+            ))
+            .chain(Self::dependencies_of(
+                &self.check_depends,
+                DependencyKind::Check,
+            ))
+            .chain(Self::dependencies_of(
+                &self.opt_depends,
+                DependencyKind::Optional,
+            ))
+            .chain(Self::dependencies_of(
+                &self.provides,
+                DependencyKind::Provides,
+            ))
+            .chain(Self::dependencies_of(
+                &self.conflicts,
+                DependencyKind::Conflicts,
+            ))
+            .collect()
+    }
+
+    pub fn is_outdated(&self) -> bool {
+        self.out_of_date.is_some()
+    }
+}
+
+pub fn fetch_package_info(package: &str) -> Result<RpcPackage, RpcError> {
     let url = format!(
         "{}/rpc/v5/info/{package}",
         config::AUR_URL
     );
 
     let response: RpcResponse = reqwest::blocking::get(url)
-        .context("failed to reach AUR RPC")?
+        .map_err(RpcError::request)?
         .json()
-        .context("failed to parse AUR response")?;
+        .map_err(RpcError::Malformed)?;
 
     response
         .results
         .into_iter()
         .next()
-        .ok_or_else(|| anyhow::anyhow!(
-            "package '{package}' not found"
-        ))
+        .ok_or_else(|| RpcError::NotFound(package.to_string()))
 }

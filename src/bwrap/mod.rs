@@ -1,6 +1,12 @@
 use std::ffi::OsString;
 
+use thiserror::Error;
+
 pub mod runner;
+
+#[derive(Debug, Error)]
+#[error("failed to spawn bwrap")]
+pub struct SpawnError(#[from] std::io::Error);
 
 pub struct Builder(Vec<OsString>);
 
@@ -106,7 +112,7 @@ impl Builder {
             .arg("--noconfirm")
     }
 
-    pub fn build(self) -> anyhow::Result<runner::Bwrap> {
-        Ok(runner::Bwrap::new(self.0)?)
+    pub fn build(self) -> Result<runner::Bwrap, SpawnError> {
+        runner::Bwrap::new(self.0)
     }
 }

@@ -1,49 +1,94 @@
-use std::path::Path;
+use std::{io, path::Path};
 
-use srcinfo::Srcinfo;
-
-use crate::build::{Environment, SandboxFiles};
-use crate::config;
-use crate::dependency::DependencyResolver;
-use crate::ui;
-use crate::aur;
+use crate::{
+    aur, cli::CliError, config, dependency::{self, InstallPlan, PackageNode, PackageSource}, ui::{self, prompt},
+};
 
 
-pub fn install(package_name: &str) -> anyhow::Result<()> {
-    ui::header(&format!("Installing {}", package_name));
+pub fn install<'a, T: IntoIterator<Item = &'a str>>(package_names: T, verbose: bool) -> Result<(), CliError>
 
-    let info = aur::rpc::fetch_package_info(package_name)?;
-    ui::step(format!("Cloning {} repository", info.name));
-    let package = aur::Package::new(
-        &info.name,
-        &info.package_base,
-        config::BUILD_PATH,
-    )?;
+{
+    let package_names: Vec<&str> = package_names.into_iter().collect();
 
-    match package.clone_repository(Path::new(config::BUILD_PATH)) {
-        Ok(directory) => {
-            ui::header("Dependency resolution");
-            let srcinfo = Srcinfo::from_path(&Path::new(config::BUILD_PATH).join(".SRCINFO"))?;
-            let dependencies = DependencyResolver::from_srcinfo::<Vec<_>>(srcinfo)?;
+    ui::step(&format!("Installing {}", package_names.join(", ")));
+    ui::step("Dependency resolution");
+    let graph = dependency::Resolver::new()?
+        .resolve(package_names)?;
 
-            ui::header(&format!("Building {}", package_name));
-            let sandbox = SandboxFiles::initialize()?;
-            let env = Environment::new(&sandbox)?;
+    let plan = InstallPlan::from_graph(&graph);
+    ui::header("Install plan");
+    ui::install_plan(&plan);
 
-
-            Ok(())
-        }
-        Err(err) => {
-            ui::error("failed to clone a repository");
-            ui::error(err.to_string());
-            ui::info("cleaning...");
-
-            if let Err(err) = package.clean() {
-                ui::error("failed to clean up");
-                ui::error(err.to_string());
-            }
-
-            return Err(err.into());
-        }
+    if verbose {
+        ui::aur_details(&plan);
     }
+    use owo_colors::OwoColorize;
+
+    ui::step(format!(
+        "continue? {}",
+        "[y/n]".green()
+    ));
+
+    if !confirm() {
+        Err(CliError::UserCancelled)
+    } else {
+        fetch_sources(&plan)?;
+        Ok(())
+    }
+
+}
+
+
+pub fn confirm() -> bool {
+    let mut input = prompt();
+
+
+    matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
+}
+
+fn fetch_sources(plan: &InstallPlan) -> Result<(), CliError> {
+    let aur_packages = plan
+        .packages
+        .iter()
+        .filter(|package| {
+            matches!(package.source, PackageSource::Aur)
+        });
+
+
+    for package in aur_packages {
+        let repository = repository_of(package)?;
+
+
+        if repository.directory().exists() {
+            ui::info(format!("{package_name} already cloned", package_name = repository.name()));
+
+            continue;
+        }
+
+
+        repository.clone_repository()?;
+
+        ui::success(format!("cloned {}", repository.base()));
+    }
+
+
+    Ok(())
+}
+
+
+fn repository_of(
+    package: &PackageNode,
+) -> Result<aur::Package<'_>, aur::PackageNameParseError> {
+    let base = package
+        .aur
+        .as_ref()
+        .map(|aur| aur.base.as_str())
+        .unwrap_or(&package.name);
+
+
+    aur::Package::new(
+        &package.name,
+        base,
+        Path::new(config::BUILD_PATH).join(&package.name),
+    )
 }
