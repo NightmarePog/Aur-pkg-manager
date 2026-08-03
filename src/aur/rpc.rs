@@ -1,4 +1,7 @@
-use crate::{config, dependency::{Dependency, DependencyKind}};
+use crate::{
+    config,
+    dependency::{Dependency, DependencyKind},
+};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -131,10 +134,7 @@ impl RpcPackage {
 }
 
 pub fn fetch_package_info(package: &str) -> Result<RpcPackage, RpcError> {
-    let url = format!(
-        "{}/rpc/v5/info/{package}",
-        config::AUR_URL
-    );
+    let url = format!("{}/rpc/v5/info/{package}", config::AUR_URL);
 
     let response: RpcResponse = reqwest::blocking::get(url)
         .map_err(RpcError::request)?

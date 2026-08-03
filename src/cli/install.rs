@@ -1,19 +1,22 @@
-use std::{io, path::Path};
+use std::{path::Path, path::PathBuf};
 
 use crate::{
-    aur, cli::CliError, config, dependency::{self, InstallPlan, PackageNode, PackageSource}, ui::{self, prompt},
+    aur, build,
+    cli::{CliError, InstalledPackages},
+    config,
+    dependency::{self, InstallPlan, PackageNode, PackageSource},
+    ui::{self, prompt},
 };
 
-
-pub fn install<'a, T: IntoIterator<Item = &'a str>>(package_names: T, verbose: bool) -> Result<(), CliError>
-
-{
-    let package_names: Vec<&str> = package_names.into_iter().collect();
-
-    ui::step(&format!("Installing {}", package_names.join(", ")));
-    ui::step("Dependency resolution");
-    let graph = dependency::Resolver::new()?
-        .resolve(package_names)?;
+pub fn install<'a, T: IntoIterator<Item = &'a str>>(
+    package_names: T,
+    verbose: bool,
+) -> Result<(), CliError> {
+    let loading = ui::loading("Reading installed package database")?;
+    let resolver = dependency::Resolver::new()?;
+    loading.set_message("Resolving package sources".to_owned());
+    let graph = resolver.resolve(package_names, &loading)?;
+    drop(loading);
 
     let plan = InstallPlan::from_graph(&graph);
     ui::header("Install plan");
@@ -22,69 +25,61 @@ pub fn install<'a, T: IntoIterator<Item = &'a str>>(package_names: T, verbose: b
     if verbose {
         ui::aur_details(&plan);
     }
-    use owo_colors::OwoColorize;
+    ui::question("Continue with installation? [y/N]");
+    ui::prompt_marker();
 
-    ui::step(format!(
-        "continue? {}",
-        "[y/n]".green()
-    ));
-
-    if !confirm() {
-        Err(CliError::UserCancelled)
-    } else {
-        fetch_sources(&plan)?;
-        Ok(())
+    if !confirm()? {
+        return Err(CliError::UserCancelled);
     }
 
-}
+    ui::step("Fetching sources");
+    let build_plan = build::BuildPlan::from(fetch_sources(&plan)?);
 
-
-pub fn confirm() -> bool {
-    let mut input = prompt();
-
-
-    matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
-}
-
-fn fetch_sources(plan: &InstallPlan) -> Result<(), CliError> {
-    let aur_packages = plan
-        .packages
-        .iter()
-        .filter(|package| {
-            matches!(package.source, PackageSource::Aur)
-        });
-
-
-    for package in aur_packages {
-        let repository = repository_of(package)?;
-
-
-        if repository.directory().exists() {
-            ui::info(format!("{package_name} already cloned", package_name = repository.name()));
-
-            continue;
-        }
-
-
-        repository.clone_repository()?;
-
-        ui::success(format!("cloned {}", repository.base()));
-    }
-
-
+    ui::step("Build");
+    let environment = build::Environment::new(build::SandboxFiles::new()?)?;
+    let result = build_plan.execute(&environment)?;
+    ui::success(format_args!("built {} artifact(s)", result.artifacts()));
+    ui::step("Installing packages");
+    result.install()?;
+    ui::success("installed packages");
     Ok(())
 }
 
+pub fn confirm() -> Result<bool, CliError> {
+    let answer = prompt()?;
+    Ok(answer.trim().eq_ignore_ascii_case("y") || answer.trim().eq_ignore_ascii_case("yes"))
+}
 
-fn repository_of(
-    package: &PackageNode,
-) -> Result<aur::Package<'_>, aur::PackageNameParseError> {
+fn fetch_sources(plan: &InstallPlan) -> Result<InstalledPackages, CliError> {
+    let packages = plan
+        .packages
+        .iter()
+        .filter(|p| matches!(p.source, PackageSource::Aur))
+        .map(fetch_source)
+        .collect::<Result<Vec<_>, CliError>>()?;
+
+    Ok(InstalledPackages(packages))
+}
+
+fn fetch_source(package: &PackageNode) -> Result<PathBuf, CliError> {
+    let repo = repository_of(package)?;
+
+    if repo.directory().exists() {
+        ui::info(format_args!("{} already cloned", repo.name()));
+    } else {
+        repo.clone_repository()?;
+        ui::success(format_args!("cloned {}", repo.base()));
+    }
+
+    Ok(repo.directory().to_path_buf())
+}
+
+fn repository_of(package: &PackageNode) -> Result<aur::Package<'_>, aur::PackageNameParseError> {
     let base = package
         .aur
         .as_ref()
         .map(|aur| aur.base.as_str())
         .unwrap_or(&package.name);
-
 
     aur::Package::new(
         &package.name,

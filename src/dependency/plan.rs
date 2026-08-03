@@ -1,10 +1,8 @@
-use super::{DependencyGraph, PackageNode};
-
+use crate::dependency::{DependencyGraph, PackageNode};
 
 pub struct InstallPlan {
     pub packages: Vec<PackageNode>,
 }
-
 
 impl InstallPlan {
     pub fn from_graph(graph: &DependencyGraph) -> Self {

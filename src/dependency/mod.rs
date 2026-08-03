@@ -1,20 +1,16 @@
 mod graph;
 mod package;
-mod source;
-mod resolver;
 mod plan;
+mod resolver;
+mod source;
+
+use std::process::Command;
 
 pub use graph::DependencyGraph;
-pub use package::{
-    installed_packages,
-    AurMeta,
-    PacmanError,
-    PackageNode,
-};
-pub use source::PackageSource;
-pub use resolver::{ResolveError, Resolver};
+pub use package::{AurMeta, PackageNode, PacmanError, installed_packages};
 pub use plan::InstallPlan;
-
+pub use resolver::{ResolveError, Resolver};
+pub use source::PackageSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DependencyKind {
@@ -26,52 +22,135 @@ pub enum DependencyKind {
     Conflicts,
 }
 
-
 impl DependencyKind {
     pub fn is_resolvable(self) -> bool {
         matches!(self, Self::Runtime | Self::Build | Self::Check)
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Dependency {
     pub name: String,
     pub kind: DependencyKind,
+    spec: String,
+    requirement: Option<VersionRequirement>,
+    requirement_name: String,
 }
 
+#[derive(Debug, Clone)]
+struct VersionRequirement {
+    operator: VersionOperator,
+    version: String,
+}
 
-impl Dependency {
-    pub fn new(raw: &str, kind: DependencyKind) -> Self {
-        Self {
-            name: normalize_name(raw).to_string(),
-            kind,
+#[derive(Debug, Clone, Copy)]
+enum VersionOperator {
+    Equal,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+}
+
+impl VersionOperator {
+    const fn symbol(self) -> &'static str {
+        match self {
+            Self::Equal => "=",
+            Self::Less => "<",
+            Self::LessEqual => "<=",
+            Self::Greater => ">",
+            Self::GreaterEqual => ">=",
         }
     }
 }
 
+impl Dependency {
+    pub fn new(raw: &str, kind: DependencyKind) -> Self {
+        let spec = raw.trim().to_owned();
+        let (name, requirement) = parse_requirement(&spec);
+        let name = name.to_owned();
 
-pub fn normalize_name(dependency: &str) -> &str {
-    dependency
-        .split(['>', '<', '=', ':'])
-        .next()
-        .unwrap_or(dependency)
-        .trim()
+        Self {
+            name: name.clone(),
+            kind,
+            spec,
+            requirement,
+            requirement_name: name,
+        }
+    }
+
+    fn for_provider(&self, name: &str) -> Self {
+        let spec = self
+            .requirement
+            .as_ref()
+            .map(|requirement| {
+                format!(
+                    "{}{}{}",
+                    name,
+                    requirement.operator.symbol(),
+                    requirement.version
+                )
+            })
+            .unwrap_or_else(|| name.to_owned());
+
+        Self {
+            name: name.to_owned(),
+            kind: self.kind,
+            spec,
+            requirement: self.requirement.clone(),
+            requirement_name: self.requirement_name.clone(),
+        }
+    }
 }
 
-pub fn parse_size(value: &str) -> Option<u64> {
-    let parts: Vec<&str> =
-        value.split_whitespace().collect();
+pub fn normalize_name(dependency: &str) -> &str {
+    parse_requirement(dependency).0
+}
 
+fn parse_requirement(dependency: &str) -> (&str, Option<VersionRequirement>) {
+    let dependency = dependency.trim();
+    let (name, expression) = match dependency.find(['<', '>', '=']) {
+        Some(index) => dependency.split_at(index),
+        None => (dependency, ""),
+    };
 
-    let number: f64 =
-        parts.first()?.parse().ok()?;
+    (name.trim(), VersionRequirement::parse(expression))
+}
 
+impl VersionRequirement {
+    fn parse(expression: &str) -> Option<Self> {
+        let (operator, version) = match expression.as_bytes() {
+            [b'>', b'=', ..] => (VersionOperator::GreaterEqual, &expression[2..]),
+            [b'<', b'=', ..] => (VersionOperator::LessEqual, &expression[2..]),
+            [b'>', ..] => (VersionOperator::Greater, &expression[1..]),
+            [b'<', ..] => (VersionOperator::Less, &expression[1..]),
+            [b'=', ..] => (VersionOperator::Equal, &expression[1..]),
+            _ => return None,
+        };
 
-    match *parts.get(1)? {
-        "KiB" => Some((number * 1024.0) as u64),
-        "MiB" => Some((number * 1024.0 * 1024.0) as u64),
-        "GiB" => Some((number * 1024.0 * 1024.0 * 1024.0) as u64),
-        _ => None,
+        let version = version.trim();
+        (!version.is_empty()).then(|| Self {
+            operator,
+            version: version.to_owned(),
+        })
+    }
+
+    fn matches(&self, actual: &str) -> Result<bool, PacmanError> {
+        let output = Command::new("vercmp")
+            .args([actual, &self.version])
+            .output()
+            .map_err(PacmanError::version_compare)?;
+        let comparison = String::from_utf8(output.stdout)?
+            .trim()
+            .parse::<i8>()
+            .map_err(|_| PacmanError::InvalidVersionCompare)?;
+
+        Ok(match self.operator {
+            VersionOperator::Equal => comparison == 0,
+            VersionOperator::Less => comparison < 0,
+            VersionOperator::LessEqual => comparison <= 0,
+            VersionOperator::Greater => comparison > 0,
+            VersionOperator::GreaterEqual => comparison >= 0,
+        })
     }
 }

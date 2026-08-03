@@ -1,129 +1,57 @@
-use std::{fs, path::PathBuf};
+mod bridge;
+mod environment;
+mod files;
+mod plan;
+
+use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::{bwrap, config};
+use crate::sandbox;
 
-const SANDBOX_NAME: &str = "aur-pkg-manager";
+pub use bridge::{Artifact, Database};
+pub use environment::Environment;
+pub use files::SandboxFiles;
+pub use plan::BuildPlan;
 
 #[derive(Debug, Error)]
 pub enum SandboxError {
-    #[error("failed to prepare the sandbox")]
+    #[error("failed to prepare sandbox")]
     Io(#[from] std::io::Error),
 
-    #[error("failed to locate the user data directory")]
+    #[error("failed to locate user data directory")]
     MissingDataDir,
 
     #[error(transparent)]
-    Spawn(#[from] bwrap::SpawnError),
+    Spawn(#[from] sandbox::SpawnError),
 }
 
-fn sandbox_path() -> Result<PathBuf, SandboxError> {
-    dirs::data_dir()
-        .map(|path| path.join(SANDBOX_NAME))
-        .ok_or(SandboxError::MissingDataDir)
-}
+#[derive(Debug, Error)]
+pub enum BuildError {
+    #[error(transparent)]
+    Sandbox(#[from] SandboxError),
 
-pub struct SandboxFiles {
-    path: PathBuf,
-}
+    #[error(transparent)]
+    Spawn(#[from] sandbox::SpawnError),
 
-impl SandboxFiles {
-    pub fn initialize() -> Result<Self, SandboxError> {
-        let path = sandbox_path()?;
+    #[error("makepkg failed for '{0}'")]
+    Failed(String),
 
-        fs::create_dir_all(&path)?;
+    #[error("no package artifacts found for '{0}'")]
+    NoArtifacts(String),
 
-        Self::copy_if_missing("/etc/pacman.conf", path.join("pacman.conf"))?;
-        Self::copy_if_missing(
-            "/etc/pacman.d/mirrorlist",
-            path.join("mirrorlist"),
-        )?;
-        Self::copy_if_missing(
-            "/etc/makepkg.conf",
-            path.join("makepkg.conf"),
-        )?;
+    #[error("pacman failed to install built packages")]
+    InstallFailed,
 
-        if !path.join("passwd").exists() {
-            fs::write(
-                path.join("passwd"),
-                "builder:x:1000:1000:builder:/build:/bin/bash\n",
-            )?;
-        }
+    #[error("invalid build directory: {0}")]
+    InvalidPath(PathBuf),
 
-        if !path.join("group").exists() {
-            fs::write(
-                path.join("group"),
-                "builder:x:1000:\n",
-            )?;
-        }
+    #[error(transparent)]
+    Utf8(#[from] std::string::FromUtf8Error),
 
-        Ok(Self { path })
-    }
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 
-    fn copy_if_missing(from: &str, to: PathBuf) -> Result<(), SandboxError> {
-        if !to.exists() {
-            fs::copy(from, to)?;
-        }
-
-        Ok(())
-    }
-
-    fn file(&self, name: &str) -> PathBuf {
-        self.path.join(name)
-    }
-}
-
-pub struct Environment {
-    bwrap: bwrap::runner::Bwrap,
-}
-
-impl Environment {
-    pub fn new(sandbox: &SandboxFiles) -> Result<Self, SandboxError> {
-        fs::create_dir_all(config::BUILD_PATH)?;
-
-        let mut builder = bwrap::Builder::new();
-
-        builder
-            .unshare_all()
-            .die_with_parent()
-            .proc("/proc")
-            .dev("/dev")
-            .tmpfs("/tmp")
-
-            .clearenv()
-            .setenv("HOME", "/build")
-            .setenv(
-                "PATH",
-                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            )
-            .setenv("MAKEFLAGS", "-j4")
-
-            // build output
-            .bind(config::BUILD_PATH, "/build/pkg")
-
-            // system
-            .ro_bind("/usr", "/usr")
-            .ro_bind("/bin", "/bin")
-            .ro_bind("/lib", "/lib")
-            .ro_bind("/lib64", "/lib64")
-
-            // pacman
-            .ro_bind("/var/lib/pacman", "/var/lib/pacman")
-            .bind("/var/cache/pacman/pkg", "/var/cache/pacman/pkg")
-
-            // configs
-            .ro_bind(sandbox.file("pacman.conf"), "/etc/pacman.conf")
-            .ro_bind(sandbox.file("mirrorlist"), "/etc/pacman.d/mirrorlist")
-            .ro_bind(sandbox.file("makepkg.conf"), "/etc/makepkg.conf")
-            .ro_bind(sandbox.file("passwd"), "/etc/passwd")
-            .ro_bind(sandbox.file("group"), "/etc/group")
-
-            .chdir("/build/pkg")
-            .makepkg();
-
-        Ok(Self {
-            bwrap: builder.build()?,
-        })
-    }
+    #[error(transparent)]
+    Alpm(#[from] ::alpm::Error),
 }

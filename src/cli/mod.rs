@@ -1,9 +1,13 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 use thiserror::Error;
 
 use crate::{
     aur,
+    build::{BuildError, SandboxError},
     dependency::{PacmanError, ResolveError},
+    ui,
 };
 
 pub mod install;
@@ -24,6 +28,15 @@ pub enum CliError {
     #[error(transparent)]
     Clone(#[from] aur::CloneError),
 
+    #[error(transparent)]
+    Sandbox(#[from] SandboxError),
+
+    #[error(transparent)]
+    Build(#[from] BuildError),
+
+    #[error(transparent)]
+    Ui(#[from] ui::UiError),
+
     #[error("user cancelled")]
     UserCancelled,
 }
@@ -36,14 +49,24 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Print full AUR metadata for every package in the plan
     #[arg(short, long, global = true)]
     pub verbose: bool,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
-    Install { packages: Vec<String> },
-    Run { package: String },
-    Remove { package: String },
+    Install {
+        #[arg(value_name = "PACKAGE", required = true)]
+        packages: Vec<String>,
+    },
+    Run {
+        #[arg(value_name = "PACKAGE")]
+        package: String,
+    },
+    Remove {
+        #[arg(value_name = "PACKAGE")]
+        package: String,
+    },
 }
+
+pub struct InstalledPackages(pub Vec<PathBuf>);

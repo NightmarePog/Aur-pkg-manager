@@ -91,9 +91,7 @@ pub enum CloneError {
     Git(#[source] std::io::Error),
 
     #[error("git clone failed: {stderr}")]
-    GitCloneFailed {
-        stderr: String,
-    },
+    GitCloneFailed { stderr: String },
 }
 
 impl CloneError {
