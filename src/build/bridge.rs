@@ -86,6 +86,25 @@ struct PackageDescription {
     content: String,
 }
 
+const ALLOWED_FIELD_NAMES: [&'static str; 16] = [
+    "NAME",
+    "VERSION",
+    "BASE",
+    "DESC",
+    "URL",
+    "ARCH",
+    "BUILDDATE",
+    "INSTALLDATE",
+    "PACKAGER",
+    "SIZE",
+    "REASON",
+    "LICENSE",
+    "VALIDATION",
+    "DEPENDS",
+    "OPTDEPENDS",
+    "PROVIDES",
+];
+
 impl PackageDescription {
     fn new() -> Self {
         Self {
@@ -98,6 +117,7 @@ impl PackageDescription {
         name: &str,
         values: impl IntoIterator<Item = T>,
     ) -> &mut Self {
+        debug_assert!(ALLOWED_FIELD_NAMES.contains(&name));
         let _ = writeln!(self.content, "%{name}%");
         values.into_iter().for_each(|value| {
             let _ = writeln!(self.content, "{value}");
