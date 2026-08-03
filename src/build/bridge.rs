@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use const_format::{Case, map_ascii_case};
+use const_format::{Case, map_ascii_case, str_replace};
 
 use alpm::{Alpm, LoadedPackage, SigLevel};
 
@@ -112,22 +112,28 @@ impl PackageDescription {
     }
 }
 
+macro_rules! write_fields_new_fmtname {
+    ($name:ident) => {
+        str_replace!(map_ascii_case!(Case::Upper, stringify!($name)), '_', "")
+    };
+}
+
 macro_rules! write_fields_new_impl {
     ($from:ident $self:ident) => {};
     ($from:ident $self:ident $name:ident($($nameargs:tt)*)$(.$methodname:ident($($methodargs:tt)*))*, $($rest:tt)*) => {
-        $self.write_field(map_ascii_case!(Case::Upper, stringify!($name)), [$from.$name($($nameargs)*)$(.$methodname($($methodargs)*))*]);
+        $self.write_field(write_fields_new_fmtname!($name), [$from.$name($($nameargs)*)$(.$methodname($($methodargs)*))*]);
         write_fields_new_impl!($from $self $($rest)*);
     };
     ($from:ident $self:ident ..$name:ident($($nameargs:tt)*)$(.$methodname:ident($($methodargs:tt)*))*, $($rest:tt)*) => {
-        $self.write_field(map_ascii_case!(Case::Upper, stringify!($name)), $from.$name($($nameargs)*)$(.$methodname($($methodargs)*))*);
+        $self.write_field(write_fields_new_fmtname!($name), $from.$name($($nameargs)*)$(.$methodname($($methodargs)*))*);
         write_fields_new_impl!($from $self $($rest)*);
     };
     ($from:ident $self:ident $name:ident => $value:expr, $($rest:tt)*) => {
-        $self.write_field(map_ascii_case!(Case::Upper, stringify!($name)), [$value]);
+        $self.write_field(write_fields_new_fmtname!($name), [$value]);
         write_fields_new_impl!($from $self $($rest)*);
     };
     ($from:ident $self:ident ..$name:ident => $value:expr, $($rest:tt)*) => {
-        $self.write_field(map_ascii_case!(Case::Upper, stringify!($name)), $value);
+        $self.write_field(write_fields_new_fmtname!($name), $value);
         write_fields_new_impl!($from $self $($rest)*);
     };
 }
